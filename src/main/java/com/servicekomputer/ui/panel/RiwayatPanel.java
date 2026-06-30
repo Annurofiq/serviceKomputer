@@ -11,10 +11,13 @@ import java.awt.*;
 import java.util.List;
 
 /**
- * Riwayat Servis sekarang independen dari tabel "servis" -- datanya
- * berasal dari tabel "riwayat_servis" yang diisi otomatis saat sebuah
- * data servis dihapus dari Data Servis. Hapus di sini bersifat permanen
- * dan tidak berhubungan dengan tabel servis aktif.
+ * Riwayat Servis independen dari Data Servis: setiap servis yang ditambah,
+ * diedit, atau status-nya diupdate di Data Servis OTOMATIS tersinkron di sini
+ * secara real-time (lihat ServisDAO.syncToRiwayat). Riwayat tidak perlu
+ * menunggu data dihapus dari Data Servis untuk muncul di sini.
+ *
+ * Menandai "Diambil Pelanggan" dilakukan DI SINI (bukan di Status Perbaikan),
+ * dan hapus di sini bersifat permanen serta tidak memengaruhi Data Servis.
  */
 public class RiwayatPanel extends JPanel {
 
@@ -32,13 +35,14 @@ public class RiwayatPanel extends JPanel {
         setLayout(new BorderLayout());
         setBackground(UIHelper.BG_LIGHT);
 
-        add(UIHelper.createPageHeader("Riwayat Servis", "Histori servis yang telah selesai dan dihapus dari Data Servis"), BorderLayout.NORTH);
+        add(UIHelper.createPageHeader("Riwayat Servis", "Semua histori servis, tersinkron otomatis dari Data Servis"), BorderLayout.NORTH);
 
         JPanel toolbar = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 0));
         toolbar.setBackground(UIHelper.BG_LIGHT);
         toolbar.setBorder(BorderFactory.createEmptyBorder(16, 28, 12, 28));
 
         JButton btnRefresh = UIHelper.createOutlineButton("Refresh");
+        JButton btnSelesai = UIHelper.createButton("Tandai Diambil Pelanggan", UIHelper.SUCCESS);
         JButton btnHapus = UIHelper.createButton("Hapus", UIHelper.DANGER);
 
         JLabel lblFilter = new JLabel("Filter Status:");
@@ -51,6 +55,7 @@ public class RiwayatPanel extends JPanel {
         cbFilter.setPreferredSize(new Dimension(170, 34));
 
         toolbar.add(btnRefresh);
+        toolbar.add(btnSelesai);
         toolbar.add(btnHapus);
         toolbar.add(Box.createHorizontalStrut(12));
         toolbar.add(lblFilter);
@@ -63,10 +68,6 @@ public class RiwayatPanel extends JPanel {
         table = new JTable(tableModel);
         UIHelper.styleTable(table);
         table.setAutoResizeMode(JTable.AUTO_RESIZE_OFF);
-        int[] widths = {90, 100, 130, 110, 120, 100, 250, 120, 180, 120, 360};
-        for (int i = 0; i < widths.length; i++) {
-            table.getColumnModel().getColumn(i).setPreferredWidth(widths[i]);
-        }
 
         // Wrap text untuk kolom Kerusakan (6) dan Catatan (10)
         table.getColumnModel().getColumn(6).setCellRenderer(new WrapCellRenderer());
@@ -93,6 +94,42 @@ public class RiwayatPanel extends JPanel {
             loadData();
         });
 
+        btnSelesai.addActionListener(e -> {
+            int row = table.getSelectedRow();
+            if (row < 0) {
+                JOptionPane.showMessageDialog(this, "Pilih servis yang ingin ditandai diambil!");
+                return;
+            }
+            String id = tableModel.getValueAt(row, 0).toString();
+            String statusSekarang = tableModel.getValueAt(row, 8).toString();
+
+            if ("Diambil Pelanggan".equalsIgnoreCase(statusSekarang)) {
+                JOptionPane.showMessageDialog(this, "Servis " + id + " sudah berstatus 'Diambil Pelanggan'.");
+                return;
+            }
+            if (!"Selesai".equalsIgnoreCase(statusSekarang)) {
+                JOptionPane.showMessageDialog(this,
+                        "Servis ini belum bisa ditandai 'Diambil Pelanggan'.\n" +
+                                "Status saat ini: " + statusSekarang + "\n\n" +
+                                "Perbaikan harus berstatus 'Selesai' terlebih dahulu\n" +
+                                "(ubah lewat halaman Status Perbaikan).",
+                        "Belum Bisa Diambil", JOptionPane.WARNING_MESSAGE);
+                return;
+            }
+
+            int c = JOptionPane.showConfirmDialog(this,
+                    "Tandai servis " + id + " sebagai 'Diambil Pelanggan'?",
+                    "Konfirmasi", JOptionPane.YES_NO_OPTION);
+            if (c == JOptionPane.YES_OPTION) {
+                if (dao.updateStatusDiambil(id, "Perangkat telah diambil oleh pelanggan")) {
+                    JOptionPane.showMessageDialog(this, "Status berhasil diupdate!");
+                    loadData();
+                } else {
+                    JOptionPane.showMessageDialog(this, "Gagal update status!");
+                }
+            }
+        });
+
         btnHapus.addActionListener(e -> {
             int row = table.getSelectedRow();
             if (row < 0) {
@@ -100,6 +137,18 @@ public class RiwayatPanel extends JPanel {
                 return;
             }
             String id = tableModel.getValueAt(row, 0).toString();
+            String statusSekarang = tableModel.getValueAt(row, 8).toString();
+
+            if (!"Diambil Pelanggan".equalsIgnoreCase(statusSekarang)) {
+                JOptionPane.showMessageDialog(this,
+                        "Riwayat servis " + id + " belum bisa dihapus.\n" +
+                                "Status saat ini: " + statusSekarang + "\n\n" +
+                                "Riwayat hanya bisa dihapus jika servis sudah berstatus\n" +
+                                "'Diambil Pelanggan' (selesai sepenuhnya).",
+                        "Belum Bisa Dihapus", JOptionPane.WARNING_MESSAGE);
+                return;
+            }
+
             int c = JOptionPane.showConfirmDialog(this,
                     "Hapus riwayat servis " + id + " secara permanen?\nData yang dihapus tidak dapat dikembalikan.",
                     "Konfirmasi Hapus", JOptionPane.YES_NO_OPTION, JOptionPane.WARNING_MESSAGE);
@@ -122,7 +171,7 @@ public class RiwayatPanel extends JPanel {
         for (RiwayatServis r : list) {
             tableModel.addRow(buildRow(r));
         }
-        adjustRowHeights();
+        terapkanUkuranKolomDanBaris();
     }
 
     private void filterData(String status) {
@@ -133,26 +182,18 @@ public class RiwayatPanel extends JPanel {
                 tableModel.addRow(buildRow(r));
             }
         }
-        adjustRowHeights();
+        terapkanUkuranKolomDanBaris();
     }
 
-    private void adjustRowHeights() {
-        for (int row = 0; row < table.getRowCount(); row++) {
-            int maxHeight = 32;
-            for (int col : new int[]{6, 10}) {
-                Object value = table.getValueAt(row, col);
-                JTextArea area = new JTextArea(value == null ? "" : value.toString());
-                area.setLineWrap(true);
-                area.setWrapStyleWord(true);
-                area.setFont(table.getFont());
-                area.setSize(
-                        table.getColumnModel().getColumn(col).getWidth(),
-                        Short.MAX_VALUE
-                );
-                maxHeight = Math.max(maxHeight, area.getPreferredSize().height + 12);
-            }
-            table.setRowHeight(row, maxHeight);
-        }
+    /**
+     * Lebar kolom seperti Biaya/Status/Tgl menyesuaikan isi data (pendek = sempit).
+     * Kolom Kerusakan dan Catatan dibatasi maksimal lalu sisanya wrap ke bawah.
+     */
+    private void terapkanUkuranKolomDanBaris() {
+        int[] minWidths = {80, 95, 110, 95, 95, 85, 150, 90, 130, 95, 180};
+        int[] maxWidths = {100, 110, 180, 150, 160, 140, 320, 130, 180, 110, 380};
+        UIHelper.autoFitColumnWidths(table, minWidths, maxWidths);
+        UIHelper.adjustRowHeightsForWrappedColumns(table, new int[]{6, 10});
     }
 
     private Object[] buildRow(RiwayatServis r) {

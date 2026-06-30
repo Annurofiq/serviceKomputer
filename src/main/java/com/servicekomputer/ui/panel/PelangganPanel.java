@@ -66,10 +66,45 @@ public class PelangganPanel extends JPanel {
         table = new JTable(tableModel);
         UIHelper.styleTable(table);
 
+        // AUTO_RESIZE_OFF: ID/Nama/No HP lebar TETAP, tidak pernah ikut menyusut.
+        // Kolom Alamat lebarnya dihitung manual = sisa lebar viewport scroll pane,
+        // dipasang lewat listener pada SCROLL PANE (bukan pada tabel) supaya
+        // perhitungannya selalu pakai lebar viewport yang sudah final/akurat.
+        table.setAutoResizeMode(JTable.AUTO_RESIZE_OFF);
+        final int colIdWidth = 110;
+        final int colNamaWidth = 160;
+        final int colHpWidth = 140;
+        table.getColumnModel().getColumn(0).setPreferredWidth(colIdWidth);
+        table.getColumnModel().getColumn(1).setPreferredWidth(colNamaWidth);
+        table.getColumnModel().getColumn(2).setPreferredWidth(colHpWidth);
+        table.getColumnModel().getColumn(3).setPreferredWidth(400); // estimasi awal
+
+        // Wrap text kolom Alamat (index 3)
+        table.getColumnModel().getColumn(3).setCellRenderer(new UIHelper.WrapCellRenderer());
+
+        // Saat tabel berubah ukuran (window di-resize, kolom Alamat ikut
+        // melebar/menyempit otomatis oleh Swing), hitung ulang tinggi baris
+        // supaya wrap text tetap pas dengan lebar kolom yang baru.
         JScrollPane scroll = new JScrollPane(table);
         scroll.setBorder(BorderFactory.createLineBorder(UIHelper.BORDER_COLOR, 1, true));
-        scroll.setBackground(Color.WHITE);
-        scroll.getViewport().setBackground(Color.WHITE);
+        scroll.setHorizontalScrollBarPolicy(JScrollPane.HORIZONTAL_SCROLLBAR_NEVER);
+        UIHelper.fixEmptyViewportArea(scroll);
+
+        // Setiap kali ukuran viewport berubah (window dibuka pertama kali,
+        // di-resize, sidebar toggle, dll), kolom Alamat dihitung ulang supaya
+        // = sisa lebar viewport setelah dikurangi 3 kolom tetap. Ini mencegah
+        // kolom Alamat dari "menyusut paksa" yang membuat ID/Nama/No HP ikut
+        // terpotong (masalah AUTO_RESIZE_LAST_COLUMN sebelumnya).
+        scroll.getViewport().addComponentListener(new java.awt.event.ComponentAdapter() {
+            @Override
+            public void componentResized(java.awt.event.ComponentEvent e) {
+                int viewportWidth = scroll.getViewport().getWidth();
+                int sisaAlamat = viewportWidth - (colIdWidth + colNamaWidth + colHpWidth);
+                if (sisaAlamat < 250) sisaAlamat = 250; // batas minimum supaya Alamat tetap terbaca
+                table.getColumnModel().getColumn(3).setPreferredWidth(sisaAlamat);
+                UIHelper.adjustRowHeightsForWrappedColumn(table, 3);
+            }
+        });
 
         JPanel tablePanel = new JPanel(new BorderLayout());
         tablePanel.setBackground(UIHelper.BG_LIGHT);
@@ -141,6 +176,7 @@ public class PelangganPanel extends JPanel {
                 });
             }
         }
+        UIHelper.adjustRowHeightsForWrappedColumn(table, 3);
     }
 
     public void loadData() {
@@ -151,5 +187,6 @@ public class PelangganPanel extends JPanel {
                     p.getIdPelanggan(), p.getNama(), p.getNoHp(), p.getAlamat()
             });
         }
+        UIHelper.adjustRowHeightsForWrappedColumn(table, 3);
     }
 }

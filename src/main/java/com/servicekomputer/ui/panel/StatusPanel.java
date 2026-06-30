@@ -100,6 +100,16 @@ public class StatusPanel extends JPanel {
         String catatanSaat = tableModel.getValueAt(row, 6) != null ?
                 tableModel.getValueAt(row, 6).toString() : "";
 
+        // Jika sudah "Diambil Pelanggan" (final, di-set dari Riwayat Servis),
+        // status tidak bisa diubah lagi dari halaman ini.
+        if ("Diambil Pelanggan".equalsIgnoreCase(statusSaat)) {
+            JOptionPane.showMessageDialog(this,
+                    "Servis " + idServis + " sudah berstatus 'Diambil Pelanggan'.\n" +
+                            "Status ini bersifat final dan tidak dapat diubah lagi.",
+                    "Tidak Bisa Diubah", JOptionPane.INFORMATION_MESSAGE);
+            return;
+        }
+
         JDialog dialog = new JDialog((Frame) null, "Update Status - " + idServis, true);
         dialog.setSize(420, 320);
         dialog.setLocationRelativeTo(this);
@@ -111,11 +121,18 @@ public class StatusPanel extends JPanel {
         lblStatus.setFont(UIHelper.fontBold(12));
         lblStatus.setForeground(UIHelper.TEXT_DARK);
 
-        String[] statusOptions = {"Menunggu", "Sedang Diperbaiki", "Menunggu Sparepart", "Selesai", "Diambil Pelanggan"};
+        String[] statusOptions = {"Menunggu", "Sedang Diperbaiki", "Menunggu Sparepart", "Selesai"};
         JComboBox<String> cbStatus = new JComboBox<>(statusOptions);
         cbStatus.setBounds(24, 48, 370, 38);
         UIHelper.styleComboBox(cbStatus);
-        cbStatus.setSelectedItem(statusSaat);
+        // Jika status saat ini sudah "Diambil Pelanggan" (di-set dari Riwayat),
+        // tampilkan "Selesai" sebagai pilihan default karena "Diambil Pelanggan"
+        // tidak lagi tersedia untuk diubah dari halaman ini.
+        if ("Diambil Pelanggan".equalsIgnoreCase(statusSaat)) {
+            cbStatus.setSelectedItem("Selesai");
+        } else {
+            cbStatus.setSelectedItem(statusSaat);
+        }
 
         JLabel lblCatatan = new JLabel("Catatan Perbaikan");
         lblCatatan.setBounds(24, 100, 200, 22);
@@ -171,36 +188,7 @@ public class StatusPanel extends JPanel {
                     s.getCatatan() != null ? s.getCatatan() : "-"
             });
         }
-
-        // Sesuaikan tinggi baris agar teks tidak terpotong
-        for (int row = 0; row < table.getRowCount(); row++) {
-
-            int maxHeight = 32;
-
-            for (int col : new int[]{4, 6}) {
-
-                Object value = table.getValueAt(row, col);
-
-                JTextArea area = new JTextArea(value == null ? "" : value.toString());
-
-                area.setLineWrap(true);
-                area.setWrapStyleWord(true);
-                area.setFont(table.getFont());
-
-                // WAJIB agar tinggi bisa dihitung dengan benar
-                area.setSize(
-                        table.getColumnModel().getColumn(col).getWidth(),
-                        Short.MAX_VALUE
-                );
-
-                maxHeight = Math.max(
-                        maxHeight,
-                        area.getPreferredSize().height + 12
-                );
-            }
-
-            table.setRowHeight(row, maxHeight);
-        }
+        UIHelper.adjustRowHeightsForWrappedColumns(table, new int[]{4, 6});
     }
 
     // Renderer untuk wrap text di sel tabel

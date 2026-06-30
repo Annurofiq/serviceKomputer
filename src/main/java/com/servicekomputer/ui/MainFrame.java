@@ -189,7 +189,8 @@ public class MainFrame extends JFrame {
     private void refreshPanel(String card) {
         for (Component c : contentPanel.getComponents()) {
             if (!c.isVisible()) continue;
-            if (c instanceof PelangganPanel) ((PelangganPanel) c).loadData();
+            if (c instanceof DashboardPanel) ((DashboardPanel) c).loadData();
+            else if (c instanceof PelangganPanel) ((PelangganPanel) c).loadData();
             else if (c instanceof TeknisiPanel) ((TeknisiPanel) c).loadData();
             else if (c instanceof ServisPanel) ((ServisPanel) c).loadData();
             else if (c instanceof StatusPanel) ((StatusPanel) c).loadData();

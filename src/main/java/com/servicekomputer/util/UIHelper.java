@@ -125,11 +125,31 @@ public class UIHelper {
         header.setDefaultRenderer(new HeaderCellRenderer());
         header.setPreferredSize(new Dimension(0, 40));
         header.setOpaque(true);
-        header.setBackground(TABLE_HEADER_BG);
+        // Background komponen header dibiarkan PUTIH (bukan ungu) -- warna ungu
+        // hanya dirender per-kolom lewat HeaderCellRenderer. Ini mencegah sisa
+        // ruang kosong di kanan tabel (saat total lebar kolom < lebar viewport)
+        // ikut terlihat ungu seperti "kolom hantu".
+        header.setBackground(Color.WHITE);
         header.setForeground(Color.WHITE);
         header.setReorderingAllowed(false);
 
+        // Latar belakang viewport tabel (area di luar baris data) dibuat putih,
+        // supaya tidak ada warna aneh muncul jika tabel lebih pendek dari scroll pane.
+        table.setFillsViewportHeight(true);
+
         table.setDefaultRenderer(Object.class, new StripedTableCellRenderer());
+    }
+
+    /**
+     * Pasang setelah mengatur scroll pane: memastikan area kosong di sebelah
+     * kanan/bawah tabel (jika kolom data tidak memenuhi lebar viewport) berwarna
+     * putih polos, bukan ikut menampilkan sisa garis/header ungu.
+     */
+    public static void fixEmptyViewportArea(JScrollPane scrollPane) {
+        scrollPane.getViewport().setBackground(Color.WHITE);
+        if (scrollPane.getColumnHeader() != null) {
+            scrollPane.getColumnHeader().setBackground(Color.WHITE);
+        }
     }
 
     /** Renderer header tabel — dipaksa sama di setiap kolom agar tidak ada yang kosong/putih. */
@@ -244,5 +264,131 @@ public class UIHelper {
                 super.replace(fb, offset, length, filter(text), attrs);
             }
         });
+    }
+
+    // ===== PENYESUAIAN TINGGI BARIS TABEL UNTUK KOLOM WRAP-TEXT =====
+    /**
+     * Hitung & terapkan tinggi baris yang pas untuk SATU kolom yang memakai wrap text
+     * (misalnya kolom "Kerusakan"), supaya teks panjang tidak terpotong dan teks
+     * pendek tidak membuat baris terlalu tinggi.
+     *
+     * Dipanggil setelah data tabel selesai diisi (akhir loadData()).
+     * Menggunakan invokeLater supaya lebar kolom yang dipakai untuk menghitung
+     * sudah benar-benar final (mengatasi race condition saat tabel baru dirender).
+     */
+    public static void adjustRowHeightsForWrappedColumn(JTable table, int wrapColumn) {
+        adjustRowHeightsForWrappedColumns(table, new int[]{wrapColumn});
+    }
+
+    /**
+     * Sama seperti di atas, tapi untuk BEBERAPA kolom wrap-text sekaligus
+     * (misalnya kolom "Kerusakan" dan "Catatan" bersamaan) -- tinggi baris
+     * akan mengikuti kolom yang butuh ruang paling tinggi.
+     */
+    public static void adjustRowHeightsForWrappedColumns(JTable table, int[] wrapColumns) {
+        Runnable resize = () -> {
+            int rowCount = table.getRowCount();
+            int colCount = table.getColumnCount();
+            for (int row = 0; row < rowCount; row++) {
+                int maxHeight = 32;
+                for (int col : wrapColumns) {
+                    if (col < 0 || col >= colCount) continue;
+                    Object value = table.getValueAt(row, col);
+                    String text = value == null ? "" : value.toString();
+
+                    int colWidth = table.getColumnModel().getColumn(col).getWidth();
+                    if (colWidth <= 0) colWidth = table.getColumnModel().getColumn(col).getPreferredWidth();
+
+                    JTextArea measurer = new JTextArea(text);
+                    measurer.setLineWrap(true);
+                    measurer.setWrapStyleWord(true);
+                    measurer.setFont(table.getFont());
+                    // Kurangi sedikit untuk padding kiri-kanan renderer (lihat WrapCellRenderer: 8+8)
+                    measurer.setSize(Math.max(colWidth - 16, 10), Short.MAX_VALUE);
+
+                    int height = measurer.getPreferredSize().height + 12; // + padding atas-bawah
+                    maxHeight = Math.max(maxHeight, height);
+                }
+                if (row < table.getRowCount()) {
+                    table.setRowHeight(row, maxHeight);
+                }
+            }
+        };
+
+        // Jalankan sekarang untuk estimasi awal, lalu sekali lagi setelah layout final.
+        resize.run();
+        SwingUtilities.invokeLater(resize);
+    }
+
+    // ===== LEBAR KOLOM OTOMATIS SESUAI ISI DATA =====
+    /**
+     * Hitung & terapkan lebar tiap kolom berdasarkan teks terlebar di kolom itu
+     * (header maupun isi baris) -- mirip "AutoFit Column Width" di Excel/Sheets.
+     * Kolom dengan teks pendek (misal "Biaya": "Rp 20.000.000") jadi sempit pas,
+     * kolom dengan teks panjang melebar secukupnya sampai batas maxWidth, lalu
+     * sisanya di-wrap (gunakan bersama WrapCellRenderer + adjustRowHeights...).
+     *
+     * @param table       tabel yang akan diatur
+     * @param minWidths   lebar minimum tiap kolom (px), array sepanjang jumlah kolom
+     * @param maxWidths   lebar maksimum tiap kolom (px); isi 0 / negatif berarti tak terbatas
+     */
+    public static void autoFitColumnWidths(JTable table, int[] minWidths, int[] maxWidths) {
+        int colCount = table.getColumnCount();
+        FontMetrics headerMetrics = table.getFontMetrics(fontBold(13));
+        FontMetrics cellMetrics = table.getFontMetrics(table.getFont());
+
+        for (int col = 0; col < colCount; col++) {
+            String header = table.getColumnModel().getColumn(col).getHeaderValue() != null
+                    ? table.getColumnModel().getColumn(col).getHeaderValue().toString() : "";
+            int widest = headerMetrics.stringWidth(header) + 24; // padding header
+
+            for (int row = 0; row < table.getRowCount(); row++) {
+                Object value = table.getValueAt(row, col);
+                String text = value == null ? "" : value.toString();
+                int textWidth = cellMetrics.stringWidth(text) + 20; // padding sel kiri-kanan
+                widest = Math.max(widest, textWidth);
+            }
+
+            int min = (minWidths != null && col < minWidths.length) ? minWidths[col] : 60;
+            int max = (maxWidths != null && col < maxWidths.length) ? maxWidths[col] : 0;
+
+            int finalWidth = Math.max(widest, min);
+            if (max > 0) finalWidth = Math.min(finalWidth, max);
+
+            table.getColumnModel().getColumn(col).setPreferredWidth(finalWidth);
+        }
+    }
+
+    /**
+     * Renderer wrap-text yang bisa dipakai ulang di panel mana pun (mis. kolom
+     * "Alamat" di Data Pelanggan, "Kerusakan"/"Catatan" di Data Servis & Riwayat).
+     * Sel akan menampilkan teks penuh dengan baris baru otomatis, bukan kepotong "...".
+     */
+    public static class WrapCellRenderer extends javax.swing.table.DefaultTableCellRenderer {
+        @Override
+        public Component getTableCellRendererComponent(JTable table, Object value,
+                                                       boolean isSelected, boolean hasFocus, int row, int column) {
+
+            JTextArea area = new JTextArea();
+            area.setText(value == null ? "" : value.toString());
+            area.setLineWrap(true);
+            area.setWrapStyleWord(true);
+            area.setFont(table.getFont());
+            area.setSize(
+                    table.getColumnModel().getColumn(column).getWidth(),
+                    Short.MAX_VALUE
+            );
+            area.setBorder(BorderFactory.createEmptyBorder(6, 8, 6, 8));
+            area.setOpaque(true);
+
+            if (isSelected) {
+                area.setBackground(table.getSelectionBackground());
+                area.setForeground(table.getSelectionForeground());
+            } else {
+                area.setBackground(row % 2 == 0 ? Color.WHITE : TABLE_ROW_ALT);
+                area.setForeground(table.getForeground());
+            }
+            return area;
+        }
     }
 }

@@ -1,6 +1,7 @@
 package com.servicekomputer.ui.panel;
 
 import com.servicekomputer.dao.PelangganDAO;
+import com.servicekomputer.dao.RiwayatServisDAO;
 import com.servicekomputer.dao.ServisDAO;
 import com.servicekomputer.dao.TeknisiDAO;
 import com.servicekomputer.util.SessionManager;
@@ -8,10 +9,25 @@ import com.servicekomputer.util.SessionManager;
 import javax.swing.*;
 import java.awt.*;
 
+/**
+ * Dashboard menghitung ulang semua statistik setiap kali dibuka (lihat
+ * loadData(), dipanggil dari MainFrame.refreshPanel) -- supaya data yang
+ * ditampilkan selalu realtime sesuai kondisi database saat ini, bukan
+ * snapshot dari saat MainFrame pertama kali dibuka.
+ */
 public class DashboardPanel extends JPanel {
+
+    private JPanel statsPanel;
+    private JLabel lblInfo;
+
+    private final ServisDAO servisDAO = new ServisDAO();
+    private final PelangganDAO pelangganDAO = new PelangganDAO();
+    private final TeknisiDAO teknisiDAO = new TeknisiDAO();
+    private final RiwayatServisDAO riwayatDAO = new RiwayatServisDAO();
 
     public DashboardPanel() {
         initUI();
+        loadData();
     }
 
     private void initUI() {
@@ -34,13 +50,29 @@ public class DashboardPanel extends JPanel {
         header.add(lblTitle, BorderLayout.NORTH);
         header.add(lblWelcome, BorderLayout.SOUTH);
 
-        JPanel statsPanel = new JPanel(new GridLayout(2, 3, 15, 15));
+        // 7 kartu statistik -> grid 3x3 (baris terakhir tidak penuh, tidak masalah)
+        statsPanel = new JPanel(new GridLayout(3, 3, 15, 15));
         statsPanel.setBackground(new Color(245, 245, 255));
         statsPanel.setBorder(BorderFactory.createEmptyBorder(20, 25, 20, 25));
 
-        ServisDAO servisDAO = new ServisDAO();
-        PelangganDAO pelangganDAO = new PelangganDAO();
-        TeknisiDAO teknisiDAO = new TeknisiDAO();
+        JPanel infoPanel = new JPanel();
+        infoPanel.setBackground(Color.WHITE);
+        infoPanel.setBorder(BorderFactory.createEmptyBorder(15, 25, 15, 25));
+        infoPanel.setLayout(new FlowLayout(FlowLayout.LEFT));
+
+        lblInfo = new JLabel();
+        lblInfo.setFont(new Font("Segoe UI", Font.PLAIN, 13));
+        lblInfo.setForeground(new Color(80, 80, 100));
+        infoPanel.add(lblInfo);
+
+        add(header, BorderLayout.NORTH);
+        add(statsPanel, BorderLayout.CENTER);
+        add(infoPanel, BorderLayout.SOUTH);
+    }
+
+    /** Hitung ulang semua statistik dari database dan render ulang kartu-kartunya. */
+    public void loadData() {
+        statsPanel.removeAll();
 
         statsPanel.add(createCard("Total Servis", String.valueOf(servisDAO.countAll()),
                 "🔧", new Color(79, 70, 229)));
@@ -54,21 +86,14 @@ public class DashboardPanel extends JPanel {
                 "✅", new Color(34, 197, 94)));
         statsPanel.add(createCard("Total Pelanggan", String.valueOf(pelangganDAO.getAll().size()),
                 "👥", new Color(168, 85, 247)));
+        statsPanel.add(createCard("Total Riwayat Servis", String.valueOf(riwayatDAO.countAll()),
+                "📜", new Color(20, 184, 166)));
 
-        JPanel infoPanel = new JPanel();
-        infoPanel.setBackground(Color.WHITE);
-        infoPanel.setBorder(BorderFactory.createEmptyBorder(15, 25, 15, 25));
-        infoPanel.setLayout(new FlowLayout(FlowLayout.LEFT));
+        statsPanel.revalidate();
+        statsPanel.repaint();
 
-        JLabel lblInfo = new JLabel("📌  Teknisi terdaftar: " + teknisiDAO.getAll().size() +
+        lblInfo.setText("📌  Teknisi terdaftar: " + teknisiDAO.getAll().size() +
                 "  |  Diambil Pelanggan: " + servisDAO.countByStatus("Diambil Pelanggan"));
-        lblInfo.setFont(new Font("Segoe UI", Font.PLAIN, 13));
-        lblInfo.setForeground(new Color(80, 80, 100));
-        infoPanel.add(lblInfo);
-
-        add(header, BorderLayout.NORTH);
-        add(statsPanel, BorderLayout.CENTER);
-        add(infoPanel, BorderLayout.SOUTH);
     }
 
     private JPanel createCard(String title, String value, String icon, Color color) {
